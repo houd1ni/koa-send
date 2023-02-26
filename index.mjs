@@ -5,7 +5,7 @@
 import { stat as _stat, access as _access, createReadStream } from 'fs'
 import { promisify } from 'util'
 const debug = require('debug')('koa-send')
-import resolvePath from 'resolve-path'
+import resolvePath from './local-libs/resolve-path.mjs'
 import createError from 'http-errors'
 import assert from 'assert'
 
