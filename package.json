@@ -1,7 +1,7 @@
 {
   "name": "@houd1ni/koa-send",
   "description": "Transfer static files",
-  "version": "5.1.2",
+  "version": "5.1.3",
   "main": "index.js",
   "type": "module",
   "exports": {

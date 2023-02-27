@@ -14,7 +14,7 @@
  */
 
 const createError = require('http-errors')
-const {join, normalize, isAbsolute, sep} = require('path')
+const {join, normalize, isAbsolute, sep, resolve} = require('path')
 
 /**
  * Module variables.
