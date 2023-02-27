@@ -34,8 +34,8 @@ const UP_PATH_REGEXP = /(?:^|[\\/])\.\.(?:[\\/]|$)/
 
 export default (rootPath, relativePath) => {
   // root is optional, similar to root.resolve
-  const arg1 = rootPath === undefined
-  const arg2 = relativePath === undefined
+  const arg1 = rootPath !== undefined
+  const arg2 = relativePath !== undefined
   const root = arg2 ? rootPath : process.cwd()
   const path = arg2 ? relativePath : rootPath
 
