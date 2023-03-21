@@ -4,11 +4,12 @@
 
 import { stat as _stat, access as _access, createReadStream } from 'fs'
 import { promisify } from 'util'
-const debug = require('debug')('koa-send')
+import _debug from 'debug'
 import resolvePath from './local-libs/resolve-path.mjs'
 import createError from 'http-errors'
 import assert from 'assert'
 
+const debug = _debug('koa-send')
 const stat = promisify(_stat)
 const access = promisify(_access)
 

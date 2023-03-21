@@ -6,15 +6,8 @@
  * MIT Licensed
  */
 
-'use strict'
-
-/**
- * Module dependencies.
- * @private
- */
-
-const createError = require('http-errors')
-const {join, normalize, isAbsolute, sep, resolve} = require('path')
+import createError from 'http-errors'
+import {join, normalize, isAbsolute, sep, resolve} from 'path'
 
 /**
  * Module variables.
