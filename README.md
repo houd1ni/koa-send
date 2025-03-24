@@ -1,6 +1,6 @@
 # [**koa-send**](https://github.com/koajs/send)
 
->  Static file serving middleware.
+>  Static file serving middleware. Upgraded.
 
 [![NPM version][npm-image]][npm-url]
 [![Build status][travis-image]][travis-url]

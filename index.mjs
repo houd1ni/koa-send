@@ -2,18 +2,15 @@
  * Module dependencies.
  */
 
-import { stat as _stat, access as _access, createReadStream } from 'fs'
-import { promisify } from 'util'
-import _debug from 'debug'
+import { createReadStream } from 'fs'
+import { stat, access } from 'fs/promises'
+import { basename, extname, parse, sep } from 'path'
 import resolvePath from './local-libs/resolve-path.mjs'
 import createError from 'http-errors'
 import assert from 'assert'
+const {isArray} = Array
 
-const debug = _debug('koa-send')
-const stat = promisify(_stat)
-const access = promisify(_access)
-
-async function exists (path) {
+async function exists(path) {
   try {
     await access(path)
     return true
@@ -21,14 +18,34 @@ async function exists (path) {
     return false
   }
 }
+function decode(path) {
+  try {
+    return decodeURIComponent(path)
+  } catch (err) {
+    return -1
+  }
+}
 
-import { normalize, basename, extname, resolve, parse, sep } from 'path'
+const time = () => {} // (label, path) => console.time(`${label}-${path}`)
+const timeEnd = time // (label, path) => console.timeEnd(`${label}-${path}`)
 
-/**
- * Expose `send()`.
- */
 
-export default send
+const get_opts = (opts, path) => ({
+  root: opts.root || '',
+  trailingSlash: path[path.length - 1] === '/',
+  path: decode(path.slice(parse(path).root.length)),
+  index: opts.index,
+  maxage: opts.maxage || opts.maxAge || 0,
+  immutable: opts.immutable || false,
+  hidden: opts.hidden || false,
+  format: opts.format !== false,
+  extensions: isArray(opts.extensions) ? opts.extensions : false,
+  brotli: opts.brotli !== false,
+  gzip: opts.gzip !== false,
+  setHeaders: opts.setHeaders,
+  cache: opts.cache
+})
+const cache_map = new Map()
 
 /**
  * Send file at `path` with the
@@ -41,31 +58,26 @@ export default send
  * @api public
  */
 
-async function send (ctx, path, opts = {}) {
+export default async function send(ctx, _path, opts = {}) {
+  time('part-1', _path)
+  time('begin', _path)
   assert(ctx, 'koa context required')
-  assert(path, 'pathname required')
+  assert(_path, 'pathname required')
 
-  // options
-  debug('send "%s" %j', path, opts)
-  const root = opts.root ? normalize(resolve(opts.root)) : ''
-  const trailingSlash = path[path.length - 1] === '/'
-  path = path.substr(parse(path).root.length)
-  const index = opts.index
-  const maxage = opts.maxage || opts.maxAge || 0
-  const immutable = opts.immutable || false
-  const hidden = opts.hidden || false
-  const format = opts.format !== false
-  const extensions = Array.isArray(opts.extensions) ? opts.extensions : false
-  const brotli = opts.brotli !== false
-  const gzip = opts.gzip !== false
-  const setHeaders = opts.setHeaders
+  let {
+    root, trailingSlash, path, index, maxage, immutable, hidden,
+    format, extensions, brotli, gzip, setHeaders, cache
+  } = get_opts(opts, _path)
 
+  const cache_obj = {}
+  // if(cache) console.log(path)
+  if(cache_map.has(path)) Object.assign(cache_obj, cache_map.get(path))
+  else if(cache?.test(path)) cache_map.set(path, cache_obj)
+  // console.log(cache_obj)
+  timeEnd('begin', _path)
   if (setHeaders && typeof setHeaders !== 'function') {
     throw new TypeError('option setHeaders must be function')
   }
-
-  // normalize path
-  path = decode(path)
 
   if (path === -1) return ctx.throw(400, 'failed to decode')
 
@@ -78,50 +90,65 @@ async function send (ctx, path, opts = {}) {
   if (!hidden && isHidden(root, path)) return
 
   let encodingExt = ''
+  time('_exists 1', path)
   // serve brotli file when possible otherwise gzipped file when possible
-  if (ctx.acceptsEncodings('br', 'identity') === 'br' && brotli && (await exists(path + '.br'))) {
+  const _exists = async (ext) => ext in cache_obj ? cache_obj[ext] : (cache_obj[ext]=await exists(path + `.${ext}`))
+  if(ctx.acceptsEncodings('br', 'identity') === 'br' && brotli && await _exists('br')) {
     path = path + '.br'
     ctx.set('Content-Encoding', 'br')
     ctx.res.removeHeader('Content-Length')
     encodingExt = '.br'
-  } else if (ctx.acceptsEncodings('gzip', 'identity') === 'gzip' && gzip && (await exists(path + '.gz'))) {
+  } else if(ctx.acceptsEncodings('gzip', 'identity') === 'gzip' && gzip && await _exists('gz')) {
     path = path + '.gz'
     ctx.set('Content-Encoding', 'gzip')
     ctx.res.removeHeader('Content-Length')
     encodingExt = '.gz'
   }
+  timeEnd('_exists 1', path)
 
-  if (extensions && !/\./.exec(basename(path))) {
+  time('_exists 2', path)
+  if(extensions && !/\./.exec(basename(path))) {
     const list = [].concat(extensions)
     for (let i = 0; i < list.length; i++) {
       let ext = list[i]
-      if (typeof ext !== 'string') {
+      if(typeof ext !== 'string') {
         throw new TypeError('option extensions must be array of strings or false')
       }
-      if (!/^\./.exec(ext)) ext = `.${ext}`
-      if (await exists(`${path}${ext}`)) {
-        path = `${path}${ext}`
+      if(!/^\./.exec(ext)) ext = `.${ext}`
+      if(!('exists' in cache_obj)) cache_obj.exists = {}
+      const full_path = `${path}${ext}`
+      if(
+        full_path in cache_obj.exists[full_path]
+          ? cache_obj.exists[full_path]
+          : (cache_obj.exists[full_path] = await exists(full_path))
+      ) {
+        path = full_path
         break
       }
     }
   }
+  timeEnd('_exists 2', path)
 
   // stat
   let stats
   try {
-    stats = await stat(path)
+    // console.log(cache_obj.stats && cache_obj.stats[path])
+    if(!('stats' in cache_obj)) cache_obj.stats = {}
+    time('stats-', path)
+    stats = cache_obj.stats[path] || (cache_obj.stats[path] = await stat(path))
+    timeEnd('stats-', path)
 
     // Format the path to serve static file servers
     // and not require a trailing slash for directories,
     // so that you can do both `/directory` and `/directory/`
-    if (stats.isDirectory()) {
-      if (format && index) {
+    if(stats.isDirectory())
+      if(format && index) {
         path += `/${index}`
-        stats = await stat(path)
+        stats = cache_obj.stats[path] || (cache_obj.stats[path] = await stat(path))
       } else {
+        // timeEnd('stats')
         return
       }
-    }
   } catch (err) {
     const notfound = ['ENOENT', 'ENAMETOOLONG', 'ENOTDIR']
     if (notfound.includes(err.code)) {
@@ -144,7 +171,18 @@ async function send (ctx, path, opts = {}) {
     ctx.set('Cache-Control', directives.join(','))
   }
   if (!ctx.type) ctx.type = type(path, encodingExt)
-  ctx.body = createReadStream(path)
+  timeEnd('part-1', path)
+  time('sending body', path)
+  if(cache_obj.body)
+    ctx.body = cache_obj.body
+  else {
+    const stream = createReadStream(path)
+    let cache = Buffer.allocUnsafe(0)
+    stream.on('data', (chunk) => cache = Buffer.concat([cache, chunk]))
+    stream.on('end', () => cache_obj.body = cache)
+    ctx.body = stream
+  }
+  timeEnd('sending body', path)
 
   return path
 }
@@ -153,7 +191,7 @@ async function send (ctx, path, opts = {}) {
  * Check if it's hidden.
  */
 
-function isHidden (root, path) {
+function isHidden(root, path) {
   path = path.substr(root.length).split(sep)
   for (let i = 0; i < path.length; i++) {
     if (path[i][0] === '.') return true
@@ -165,18 +203,6 @@ function isHidden (root, path) {
  * File type.
  */
 
-function type (file, ext) {
+function type(file, ext) {
   return ext !== '' ? extname(basename(file, ext)) : extname(file)
-}
-
-/**
- * Decode `path`.
- */
-
-function decode (path) {
-  try {
-    return decodeURIComponent(path)
-  } catch (err) {
-    return -1
-  }
 }
